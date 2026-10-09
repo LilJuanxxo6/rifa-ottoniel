@@ -46,6 +46,9 @@ h1 span{display:block;font-family:var(--script);font-weight:600;color:var(--ink)
 .n.taken{color:var(--taken-ink);cursor:not-allowed}
 .n.taken svg{position:absolute;inset:14% 8%;width:84%;height:72%;overflow:visible;pointer-events:none}
 .n.taken path{fill:none;stroke:var(--marker);stroke-width:7;stroke-linecap:round;opacity:.9}
+.grid[aria-busy="true"] .n{color:var(--taken-ink);pointer-events:none;animation:wait 1.2s ease-in-out infinite alternate}
+@keyframes wait{to{opacity:.45}}
+@media (prefers-reduced-motion:reduce){.grid[aria-busy="true"] .n{animation:none}}
 .legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;font-size:.85rem;color:var(--muted)}
 .legend i{display:inline-block;width:14px;height:14px;border:1.5px solid var(--line);border-radius:3px;vertical-align:-2px;margin-right:6px}
 .legend .t{background:linear-gradient(160deg,transparent 42%,var(--marker) 42% 58%,transparent 58%)}
@@ -96,9 +99,9 @@ input:focus-visible{outline:3px solid var(--leaf);outline-offset:1px}
   <section class="sheet" aria-labelledby="t-tabla">
     <div class="sheet-top">
       <h2 id="t-tabla">Escoge tu número</h2>
-      <span class="count"><strong id="libres">–</strong> libres de 100</span>
+      <span class="count"><strong id="libres">…</strong> libres de 100</span>
     </div>
-    <div class="grid" id="grid" role="group" aria-label="Números de la rifa del 00 al 99"></div>
+    <div class="grid" id="grid" aria-busy="true" role="group" aria-label="Números de la rifa del 00 al 99"></div>
     <div class="legend"><span><i></i>Disponible</span><span><i class="t"></i>Ya vendido</span></div>
     <p class="status" id="status">Cargando números…</p>
   </section>
@@ -136,28 +139,30 @@ input:focus-visible{outline:3px solid var(--leaf);outline-offset:1px}
 <script>
 /* ============ CONFIGURACIÓN: solo cambia esto ============ */
 const CONFIG = {
-  // Enlace CSV de la pestaña "Publico" (Archivo > Compartir > Publicar en la web > Publico > CSV).
-  // Vacío = usa la lista de abajo.
+  // 1) Fuente principal, en tiempo real: URL de la aplicación web de Apps Script (termina en /exec).
+  scriptUrl: "",
+  // 2) Respaldo: enlace CSV de la pestaña "Publico" (puede tardar ~5 min y a veces trae copias viejas).
   csvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRrrxaBQRKFZydbUrHXp5cv1sI8JFGaj9ejtetIULGJwHBFL7aOptS7Nw-_eCTTVq_BsWHLpL19C-Hj/pub?gid=1128073005&single=true&output=csv",
+  cadaSegundos: 20,           // cada cuánto revisa la hoja mientras la página está abierta
   whatsapp: "573153338389",   // con 57 adelante, sin espacios
   nequi: "315 333 8389",
   precio: 20000,
   premio: 500000,
   sorteo: "2026-11-27",
-  // Respaldo: números tachados en la imagen del 9 de octubre
+  // Último recurso si no se puede leer la hoja: números tachados en la imagen del 9 de octubre
   vendidos: ["00","03","05","06","07","08","09","13","14","16","17","18","23","24","25","27","29","30","31","33","38","50","70","73","77","82","89","93","94","98","99"]
 };
 /* ========================================================= */
 
 const $ = id => document.getElementById(id);
 const money = n => "$" + n.toLocaleString("es-CO");
-let taken = new Set(CONFIG.vendidos), sel = null;
+const hora = d => d.toLocaleTimeString("es-CO",{hour:"numeric",minute:"2-digit",second:"2-digit"});
+let taken = new Set(), sel = null, ready = false, busy = false, live = false;
 
 $("precio").textContent = money(CONFIG.precio);
 $("premio").textContent = money(CONFIG.premio);
 $("nequi").textContent = CONFIG.nequi;
-const d = new Date(CONFIG.sorteo + "T12:00:00");
-$("fecha").textContent = d.toLocaleDateString("es-CO",{day:"numeric",month:"long"});
+$("fecha").textContent = new Date(CONFIG.sorteo + "T12:00:00").toLocaleDateString("es-CO",{day:"numeric",month:"long"});
 $("selprice").textContent = "Boleta de " + money(CONFIG.precio);
 
 const strokes = ["M4 70 C 30 55, 60 35, 96 18","M6 60 C 35 52, 62 40, 94 30","M8 74 C 30 50, 70 30, 92 22"];
@@ -169,17 +174,18 @@ for (let i = 0; i < 100; i++) {
   grid.appendChild(b);
 }
 function render(){
+  grid.setAttribute("aria-busy", String(!ready));
   grid.querySelectorAll(".n").forEach((b,i) => {
-    const n = b.dataset.n, t = taken.has(n);
+    const n = b.dataset.n, t = ready && taken.has(n);
     b.classList.toggle("taken", t);
     b.classList.toggle("sel", n === sel);
-    b.setAttribute("aria-disabled", t);
-    b.setAttribute("aria-label", n + (t ? ", vendido" : ", disponible"));
+    b.setAttribute("aria-disabled", String(t || !ready));
+    b.setAttribute("aria-label", n + (!ready ? ", cargando" : t ? ", vendido" : ", disponible"));
     const s = b.querySelector("svg");
     if (t && !s) b.insertAdjacentHTML("beforeend",`<svg viewBox="0 0 100 90" aria-hidden="true"><path d="${strokes[i%3]}"/></svg>`);
     if (!t && s) s.remove();
   });
-  $("libres").textContent = 100 - taken.size;
+  $("libres").textContent = ready ? 100 - taken.size : "…";
   if (sel && taken.has(sel)) closeClaim();
 }
 function waLink(){
@@ -188,9 +194,10 @@ function waLink(){
   $("wa").href = `https://wa.me/${CONFIG.whatsapp}?text=${encodeURIComponent(msg)}`;
 }
 function pick(n){
-  if (taken.has(n)) return;
+  if (!ready || taken.has(n)) return;
   sel = n; $("selnum").textContent = n; waLink(); render();
   $("claim").classList.add("open"); $("claim").setAttribute("aria-hidden","false");
+  load(); // vuelve a confirmar que sigue libre
 }
 function closeClaim(){ sel = null; $("claim").classList.remove("open"); $("claim").setAttribute("aria-hidden","true"); render(); }
 $("close").addEventListener("click", closeClaim);
@@ -205,24 +212,55 @@ $("copy").addEventListener("click", async () => {
   setTimeout(() => $("copy").textContent = "Copiar número", 2200);
 });
 
-async function load(){
-  if (!CONFIG.csvUrl) { $("status").textContent = "Lista actualizada el 9 de octubre."; return; }
-  try {
-    const r = await fetch(CONFIG.csvUrl + (CONFIG.csvUrl.includes("?") ? "&" : "?") + "t=" + Date.now());
-    if (!r.ok) throw 0;
-    const next = new Set(); let rows = 0;
-    for (const line of (await r.text()).split(/\r?\n/)) {
-      const [num, est] = line.split(",").map(s => (s||"").replace(/"/g,"").trim());
-      if (!/^\d{1,2}$/.test(num) || !/ocup|libre/i.test(est)) continue;
-      rows++;
-      if (/ocup/i.test(est)) next.add(num.padStart(2,"0"));
-    }
-    if (rows < 100) throw 0; // la hoja pública aún no tiene los 100 números: no borrar la lista conocida
-    taken = next; render();
-    $("status").textContent = "Actualizado a las " + new Date().toLocaleTimeString("es-CO",{hour:"numeric",minute:"2-digit"}) + ". Puede tardar unos minutos en reflejar ventas nuevas.";
-  } catch(e) {
-    $("status").textContent = "No pudimos cargar la lista en vivo. Mostrando la última conocida; confirma tu número por WhatsApp.";
-  }
+const bust = u => u + (u.includes("?") ? "&" : "?") + "t=" + Date.now();
+const pad = n => String(n).trim().padStart(2,"0");
+
+// Fuente en tiempo real: Apps Script devuelve {ocupados:["00","03",...], total:100}
+async function fromScript(){
+  const r = await fetch(bust(CONFIG.scriptUrl), {cache:"no-store"});
+  if (!r.ok) throw 0;
+  const j = await r.json();
+  if (!Array.isArray(j.ocupados) || j.total !== 100) throw 0;
+  return new Set(j.ocupados.filter(n => /^\d{1,2}$/.test(String(n).trim())).map(pad));
 }
-render(); load(); setInterval(load, 60000);
+// Respaldo: CSV publicado (Google lo guarda en caché)
+async function fromCsv(){
+  const r = await fetch(bust(CONFIG.csvUrl), {cache:"no-store"});
+  if (!r.ok) throw 0;
+  const next = new Set(); let rows = 0;
+  for (const line of (await r.text()).split(/\r?\n/)) {
+    const [num, est] = line.split(",").map(s => (s||"").replace(/"/g,"").trim());
+    if (!/^\d{1,2}$/.test(num) || !/ocup|libre/i.test(est)) continue;
+    rows++; if (/ocup/i.test(est)) next.add(pad(num));
+  }
+  if (rows < 100) throw 0;
+  return next;
+}
+function apply(next, msg){
+  taken = next; ready = true; render();
+  $("status").textContent = msg;
+  try { localStorage.setItem("rifa-ultima", JSON.stringify([...next])); } catch(_){}
+}
+async function load(){
+  if (busy) return; busy = true;
+  try {
+    if (CONFIG.scriptUrl) {
+      try { apply(await fromScript(), "En vivo · revisado a las " + hora(new Date()) + "."); live = true; return; } catch(_){}
+      // si ya teníamos datos en vivo, no los cambiamos por la copia en caché del CSV
+      if (live) { $("status").textContent = "Conexión lenta. Mostrando la última revisión en vivo; reintentando…"; return; }
+    }
+    if (CONFIG.csvUrl) {
+      try { apply(await fromCsv(), "Revisado a las " + hora(new Date()) + ". Las ventas nuevas pueden tardar unos minutos en aparecer."); return; } catch(_){}
+    }
+    if (!ready) { // nunca se pudo leer: mostrar lo último conocido, avisando
+      let last = null;
+      try { last = JSON.parse(localStorage.getItem("rifa-ultima")); } catch(_){}
+      taken = new Set(Array.isArray(last) ? last : CONFIG.vendidos); ready = true; render();
+    }
+    $("status").textContent = "No pudimos revisar la lista en este momento. Puede no estar al día: confirma tu número por WhatsApp.";
+  } finally { busy = false; }
+}
+render(); load();
+setInterval(() => { if (!document.hidden) load(); }, CONFIG.cadaSegundos * 1000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
 </script>
