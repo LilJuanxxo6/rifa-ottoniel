@@ -1,3 +1,8 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Rifa de Ottoniel</title>
 <meta name="description" content="Rifa Solidaria para ayudar a Ottoniel. Escoge tu número y avísale a Cindy por WhatsApp.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -21,7 +26,7 @@
   --leaf:#93C760; --leaf-ink:#A9D97A; --marker:#3FD8C5; --taken-ink:#5F6C52; --heart:#F07AA2;
   --wa:#2BA862; --wa-ink:#06140B; --shadow:0 18px 40px -22px rgba(0,0,0,.8); color-scheme:dark}
 *{box-sizing:border-box}
-body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.5}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.5}
 .wrap{max-width:620px;margin:0 auto;padding-inline:16px;padding-block:20px 120px;display:grid;gap:18px}
 header{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center}
 .eyebrow{font-weight:800;font-size:.78rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
@@ -64,13 +69,21 @@ h1 span{display:block;font-family:var(--script);font-weight:600;color:var(--ink)
 .wa{background:var(--wa);color:var(--wa-ink);width:100%}
 .thanks{font-family:var(--script);font-size:1.6rem;text-align:center;color:var(--leaf-ink);margin:0}
 .thanks span{color:var(--heart)}
-/* bottom sheet */
-.claim{position:fixed;left:0;right:0;bottom:0;background:var(--paper);box-shadow:0 -12px 30px -16px rgba(0,0,0,.4);border-radius:18px 18px 0 0;
+/* panel para apartar */
+.backdrop{position:fixed;inset:0;background:rgba(20,26,16,.55);opacity:0;pointer-events:none;transition:opacity .2s ease;z-index:4}
+.backdrop.open{opacity:1;pointer-events:auto}
+.claim{position:fixed;left:0;right:0;bottom:0;border-top:6px solid var(--leaf);background:var(--paper);box-shadow:0 -12px 30px -16px rgba(0,0,0,.4);border-radius:18px 18px 0 0;
   padding:16px 16px calc(16px + env(safe-area-inset-bottom,0px));z-index:5;transform:translateY(110%);transition:transform .25s ease}
 .claim.open{transform:none}
+@media (min-width:700px){
+  .claim{left:50%;right:auto;bottom:auto;top:50%;width:min(480px,calc(100% - 32px));border-radius:18px;border-top:0;border-left:6px solid var(--leaf);
+    padding:24px;transform:translate(-50%,-40%);opacity:0;pointer-events:none;transition:transform .2s ease,opacity .2s ease}
+  .claim.open{transform:translate(-50%,-50%);opacity:1;pointer-events:auto}
+}
+.claim .wa{font-size:1.1rem;padding:16px}
 .claim-in{max-width:620px;margin:0 auto;display:grid;gap:12px}
 .claim-head{display:flex;align-items:center;gap:14px}
-.big{font-family:var(--display);font-weight:800;font-size:3rem;line-height:1;color:var(--leaf-ink);font-variant-numeric:tabular-nums;min-width:2.2ch}
+.big{font-family:var(--display);font-weight:800;font-size:3.6rem;line-height:1;color:var(--leaf-ink);font-variant-numeric:tabular-nums;min-width:2.2ch}
 .claim-head p{margin:0;font-weight:700}
 .claim-head small{display:block;color:var(--muted);font-weight:600}
 .x{margin-left:auto;background:transparent;border:0;color:var(--muted);font-size:1.6rem;cursor:pointer;line-height:1;padding:4px 8px}
@@ -78,8 +91,10 @@ label{font-weight:700;font-size:.9rem}
 input{width:100%;font:600 1rem var(--body);padding:12px;border-radius:10px;border:1.5px solid color-mix(in srgb,var(--line) 35%,transparent);background:var(--bg);color:var(--ink)}
 input:focus-visible{outline:3px solid var(--leaf);outline-offset:1px}
 .note{font-size:.82rem;color:var(--muted);margin:0}
-@media (prefers-reduced-motion:reduce){.claim{transition:none}}
+@media (prefers-reduced-motion:reduce){.claim,.backdrop{transition:none}}
 </style>
+</head>
+<body>
 
 <main class="wrap">
   <header>
@@ -123,11 +138,12 @@ input:focus-visible{outline:3px solid var(--leaf);outline-offset:1px}
   <p class="thanks">¡Gracias por ayudar a Ottoniel! <span>♥</span></p>
 </main>
 
+<div class="backdrop" id="backdrop"></div>
 <div class="claim" id="claim" role="region" aria-label="Apartar número" aria-hidden="true">
   <div class="claim-in">
     <div class="claim-head">
       <div class="big" id="selnum">27</div>
-      <p>Quiero este número<small id="selprice"></small></p>
+      <p>¡Buena elección!<small>Escribe tu nombre y avísale a Cindy</small><small id="selprice"></small></p>
       <button class="x" id="close" type="button" aria-label="Cerrar">×</button>
     </div>
     <div><label for="nombre">Tu nombre</label><input id="nombre" autocomplete="name" placeholder="Ej: Ana Restrepo"></div>
@@ -196,11 +212,13 @@ function waLink(){
 function pick(n){
   if (!ready || taken.has(n)) return;
   sel = n; $("selnum").textContent = n; waLink(); render();
-  $("claim").classList.add("open"); $("claim").setAttribute("aria-hidden","false");
+  $("claim").classList.add("open"); $("backdrop").classList.add("open"); $("claim").setAttribute("aria-hidden","false");
+  setTimeout(() => { try { $("nombre").focus({preventScroll:true}); } catch(_){} }, 250);
   load(); // vuelve a confirmar que sigue libre
 }
-function closeClaim(){ sel = null; $("claim").classList.remove("open"); $("claim").setAttribute("aria-hidden","true"); render(); }
+function closeClaim(){ sel = null; $("claim").classList.remove("open"); $("backdrop").classList.remove("open"); $("claim").setAttribute("aria-hidden","true"); render(); }
 $("close").addEventListener("click", closeClaim);
+$("backdrop").addEventListener("click", closeClaim);
 $("nombre").addEventListener("input", waLink);
 try { const v = localStorage.getItem("rifa-nombre"); if (v) $("nombre").value = v; } catch(e){}
 $("nombre").addEventListener("change", e => { try { localStorage.setItem("rifa-nombre", e.target.value); } catch(_){} });
@@ -264,3 +282,5 @@ render(); load();
 setInterval(() => { if (!document.hidden) load(); }, CONFIG.cadaSegundos * 1000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
 </script>
+</body>
+</html>
